@@ -32,11 +32,12 @@ int main()
 
     int fd_time;
     struct timespec start, end;
-    FILE *file_user, *file_kernel;
+    FILE *file_user, *file_kernel, *file_kernel_user;
     char buffer[32];
 
     file_user = fopen("user_time.txt", "w+");
     file_kernel = fopen("kernel_time.txt", "w+");
+    file_kernel_user = fopen("kernel_user_time.txt", "w+");
     for (int i = 0; i <= offset; i++) {
         lseek(fd, i, SEEK_SET);
         clock_gettime(CLOCK_MONOTONIC, &start);
@@ -52,15 +53,19 @@ int main()
                " at offset %d, returned the sequence "
                "%lld.\n",
                i, sz);
-        int size = snprintf(buffer, sizeof(buffer), "%d %ld\n", i,
-                            end.tv_nsec - start.tv_nsec);
+        long user_time = end.tv_nsec - start.tv_nsec;
+        int size = snprintf(buffer, sizeof(buffer), "%d %ld\n", i, user_time);
         fwrite(buffer, 1, size, file_user);
         size = snprintf(buffer, sizeof(buffer), "%d %s\n", i, time_str);
         fwrite(buffer, 1, size, file_kernel);
+        size = snprintf(buffer, sizeof(buffer), "%d %d\n", i,
+                        (int) user_time - atoi(time_str));
+        fwrite(buffer, 1, size, file_kernel_user);
     }
     close(fd_time);
     fclose(file_user);
     fclose(file_kernel);
+    fclose(file_kernel_user);
 
     for (int i = offset; i >= 0; i--) {
         lseek(fd, i, SEEK_SET);
