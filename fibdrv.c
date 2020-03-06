@@ -22,7 +22,9 @@ MODULE_VERSION("0.1");
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
+static struct kobject *fib_time;
 static DEFINE_MUTEX(fib_mutex);
+long long time;
 
 static long long fib_sequence(long long k)
 {
@@ -60,7 +62,15 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    long long result;
+    ktime_t ktime;
+
+    ktime = ktime_get();
+    result = fib_sequence(*offset);
+    ktime = ktime_sub(ktime_get(), ktime);
+    time = (long long) ktime_to_ns(ktime);
+
+    return (ssize_t) result;
 }
 
 /* write operation is skipped */
@@ -102,6 +112,25 @@ const struct file_operations fib_fops = {
     .open = fib_open,
     .release = fib_release,
     .llseek = fib_device_lseek,
+};
+
+static ssize_t time_show(struct kobject *kobj,
+                         struct kobj_attribute *attr,
+                         char *buf)
+{
+    return scnprintf(buf, PAGE_SIZE, "%lld", time);
+}
+
+static struct kobj_attribute time_attribute =
+    __ATTR(time, 0644, time_show, NULL);
+
+static struct attribute *attrs[] = {
+    &time_attribute.attr,
+    NULL,
+};
+
+static struct attribute_group attr_group = {
+    .attrs = attrs,
 };
 
 static int __init init_fib_dev(void)
@@ -149,7 +178,24 @@ static int __init init_fib_dev(void)
         rc = -4;
         goto failed_device_create;
     }
+
+    fib_time = kobject_create_and_add("fib_time", kernel_kobj);
+    if (!fib_time) {
+        printk(KERN_ALERT "Failed to create kobj");
+        rc = -5;
+        goto failed_kobj_create;
+    }
+    if (sysfs_create_group(fib_time, &attr_group)) {
+        printk(KERN_ALERT "Failed to create group");
+        rc = -6;
+        goto failed_group_create;
+    }
+
     return rc;
+failed_group_create:
+    kobject_put(fib_time);
+failed_kobj_create:
+    device_destroy(fib_class, fib_dev);
 failed_device_create:
     class_destroy(fib_class);
 failed_class_create:
@@ -162,6 +208,7 @@ failed_cdev:
 static void __exit exit_fib_dev(void)
 {
     mutex_destroy(&fib_mutex);
+    kobject_put(fib_time);
     device_destroy(fib_class, fib_dev);
     class_destroy(fib_class);
     cdev_del(fib_cdev);
