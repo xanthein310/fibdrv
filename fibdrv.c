@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/uaccess.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -17,7 +18,7 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 100
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
@@ -26,19 +27,79 @@ static struct kobject *fib_time;
 static DEFINE_MUTEX(fib_mutex);
 long long time;
 
-static long long fib_sequence(long long k)
+#define bigN_base 100000000
+#define bigN_num 8
+
+typedef struct bigN_t {
+    long long part[bigN_num];
+} bigN;
+
+void bigN_copy(bigN *x, bigN *y)
+{
+    for (int i = 0; i < bigN_num; i++)
+        x->part[i] = y->part[i];
+}
+
+static void bigN_add(bigN x, bigN y, bigN *result)
+{
+    memset(result, 0, sizeof(bigN));
+
+    long long carry = 0;
+    for (int i = 0; i < bigN_num; i++) {
+        long long tmp = carry + x.part[i] + y.part[i];
+        result->part[i] = tmp % bigN_base;
+        carry = tmp / bigN_base;
+    }
+}
+
+#if 0
+static void bigN_sub(bigN x, bigN y, bigN *result)
+{
+    memset(result, 0, sizeof(bigN));
+
+    for (int i = 0; i < bigN_num; i++) {
+        result->part[i] = x.part[i] - y.part[i];
+        if(result->part[i] < 0) {
+            result->part[i] += bigN_base;
+            result->part[i+1]--;
+        }
+    }
+}
+
+static void bigN_mul(bigN x, bigN y, bigN *result)
+{
+    memset(result, 0, sizeof(bigN));
+
+    for (int i = 0; i < bigN_num; i++) {
+        long long carry = 0;
+        for (int j = 0; i + j < bigN_num; j++) {
+            long long tmp = x.part[i] * y.part[j] + carry + result->part[i+j];
+            result->part[i + j] = tmp % bigN_base;
+            carry = tmp / bigN_base;
+        }
+    }
+}
+#endif
+
+static bigN fib_sequence(long long k)
 {
     /* FIXME: use clz/ctz and fast algorithms to speed up */
-    long long f[k + 2];
+    bigN x, y, result;
 
-    f[0] = 0;
-    f[1] = 1;
+    memset(&x, 0, sizeof(bigN));
+    memset(&y, 0, sizeof(bigN));
+    memset(&result, 0, sizeof(bigN));
+
+    x.part[0] = 0;
+    y.part[0] = 1;
 
     for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+        bigN_add(x, y, &result);
+        bigN_copy(&x, &y);
+        bigN_copy(&y, &result);
     }
 
-    return f[k];
+    return result;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -62,15 +123,20 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    long long result;
+    bigN result;
+    ssize_t bigNSize = sizeof(bigN);
     ktime_t ktime;
+
+    if (size < bigNSize)
+        return 0;
 
     ktime = ktime_get();
     result = fib_sequence(*offset);
+    copy_to_user(buf, &result, bigNSize);
     ktime = ktime_sub(ktime_get(), ktime);
     time = (long long) ktime_to_ns(ktime);
 
-    return (ssize_t) result;
+    return bigNSize;
 }
 
 /* write operation is skipped */

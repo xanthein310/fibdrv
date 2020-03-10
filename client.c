@@ -9,11 +9,18 @@
 #define FIB_DEV "/dev/fibonacci"
 #define FIB_TIME "/sys/kernel/fib_time/time"
 
+#define bigN_base 100000000
+#define bigN_num 8
+
+typedef struct bigN_t {
+    long long part[bigN_num];
+} bigN;
+
 int main()
 {
     long long sz;
 
-    char buf[1];
+    bigN buf;
     char write_buf[] = "testing writing";
     char time_str[10];
     int offset = 100; /* TODO: try test something bigger than the limit */
@@ -41,7 +48,7 @@ int main()
     for (int i = 0; i <= offset; i++) {
         lseek(fd, i, SEEK_SET);
         clock_gettime(CLOCK_MONOTONIC, &start);
-        sz = read(fd, buf, 1);
+        sz = read(fd, &buf, sizeof(bigN));
         clock_gettime(CLOCK_MONOTONIC, &end);
 
         fd_time = open(FIB_TIME, O_RDONLY);
@@ -49,10 +56,11 @@ int main()
             memset(time_str, 0, 10);
             read(fd_time, time_str, 10);
         }
-        printf("Reading from " FIB_DEV
-               " at offset %d, returned the sequence "
-               "%lld.\n",
-               i, sz);
+        printf("Reading from " FIB_DEV " at offset %d, returned the sequence ",
+               i);
+        for (int j = bigN_num - 1; j >= 0; j--)
+            printf("%lld ", buf.part[j]);
+        printf("\n");
         long user_time = end.tv_nsec - start.tv_nsec;
         int size = snprintf(buffer, sizeof(buffer), "%d %ld\n", i, user_time);
         fwrite(buffer, 1, size, file_user);
@@ -69,11 +77,12 @@ int main()
 
     for (int i = offset; i >= 0; i--) {
         lseek(fd, i, SEEK_SET);
-        sz = read(fd, buf, 1);
-        printf("Reading from " FIB_DEV
-               " at offset %d, returned the sequence "
-               "%lld.\n",
-               i, sz);
+        sz = read(fd, &buf, sizeof(bigN));
+        printf("Reading from " FIB_DEV " at offset %d, returned the sequence ",
+               i);
+        for (int j = bigN_num - 1; j >= 0; j--)
+            printf("%lld ", buf.part[j]);
+        printf("\n");
     }
 
     close(fd);
